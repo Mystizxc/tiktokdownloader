@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TikTok Downloader Bot - Optimized for Koyeb
+TikTok Downloader Bot - Koyeb Optimized
 """
 
 import os
@@ -9,7 +9,7 @@ import requests
 import logging
 from datetime import datetime
 
-# Enable logging
+# Setup logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -17,13 +17,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 print("=" * 60)
-print("🎬 TikTok Downloader Bot - Koyeb Edition")
+print("🤖 TikTok Bot - Koyeb Deployment")
 print("=" * 60)
 
+# Import Telegram modules
 try:
     from telegram import Update, InputMediaPhoto
     from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-    print("✅ Packages imported!")
+    print("✅ Packages imported")
 except ImportError as e:
     print(f"❌ Missing: {e}")
     sys.exit(1)
@@ -31,23 +32,68 @@ except ImportError as e:
 # ============ CONFIGURATION ============
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not BOT_TOKEN:
-    print("❌ ERROR: TELEGRAM_TOKEN not found!")
-    print("\nSet it in Koyeb Dashboard:")
-    print("1. Go to your service")
-    print("2. Click 'Variables'")
-    print("3. Add: TELEGRAM_TOKEN")
-    print("4. Value: your_bot_token")
+    print("❌ ERROR: TELEGRAM_TOKEN not set!")
+    print("\nSet in Koyeb Dashboard:")
+    print("1. Go to your Service")
+    print("2. Click 'Variables' tab")
+    print("3. Add: TELEGRAM_TOKEN = your_token")
     sys.exit(1)
 
 PORT = int(os.environ.get("PORT", 8080))
 
-# ============ TIKTOK API ============
+# ============ HEALTH CHECK SERVER ============
+print("🚀 Starting health check server...")
 
-def get_tiktok_data(url: str):
-    """Get TikTok video/slideshow data"""
+from flask import Flask, jsonify
+from threading import Thread
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return """
+    <html>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1>🤖 TikTok Downloader Bot</h1>
+            <p>Bot is running on Koyeb! 🚀</p>
+            <p><a href="/health">Health Check</a></p>
+            <p><a href="/status">Status</a></p>
+        </body>
+    </html>
+    """
+
+@app.route('/health')
+def health():
+    return jsonify({
+        "status": "healthy",
+        "service": "tiktok-bot",
+        "timestamp": datetime.now().isoformat(),
+        "telegram": "connected"
+    })
+
+@app.route('/status')
+def status():
+    return jsonify({
+        "bot": "running",
+        "platform": "koyeb",
+        "tier": "free",
+        "uptime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
+
+def run_flask():
+    """Run Flask in separate thread"""
+    app.run(host='0.0.0.0', port=PORT, debug=False)
+
+# Start health check
+Thread(target=run_flask, daemon=True).start()
+print(f"✅ Health check running on port {PORT}")
+
+# ============ TIKTOK FUNCTIONS ============
+
+def download_tiktok(url: str):
+    """Download TikTok video or slideshow"""
     try:
-        # Use TikWM API
-        api_url = f"https://www.tikwm.com/api/?url={url}&hd=1"
+        api_url = f"https://www.tikwm.com/api/?url={url}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json"
@@ -61,7 +107,7 @@ def get_tiktok_data(url: str):
             if data.get("code") == 0 and data.get("data"):
                 content = data["data"]
                 
-                # Check for slideshow
+                # Slideshow detection
                 images = content.get("images")
                 if images:
                     if isinstance(images, str):
@@ -70,124 +116,127 @@ def get_tiktok_data(url: str):
                     return {
                         "success": True,
                         "type": "slideshow",
-                        "images": images[:10],  # Max 10 for Telegram
-                        "title": content.get("title", "TikTok Slideshow"),
+                        "images": images[:10],  # Telegram limit
+                        "title": content.get("title", "TikTok Slideshow")[:100],
                         "author": content.get("author", {}).get("nickname", "")
                     }
                 
-                # Check for video
+                # Video detection
                 video_url = content.get("hdplay") or content.get("play")
                 if video_url:
                     return {
                         "success": True,
                         "type": "video",
                         "video_url": video_url,
-                        "title": content.get("title", "TikTok Video")
+                        "title": content.get("title", "TikTok Video")[:100]
                     }
         
         return {"success": False, "error": "API failed"}
     
     except Exception as e:
-        logger.error(f"TikTok API error: {e}")
+        logger.error(f"Download error: {e}")
         return {"success": False, "error": str(e)}
 
 # ============ BOT COMMANDS ============
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send welcome message"""
+    """Start command"""
     user = update.effective_user
     await update.message.reply_text(
         f"👋 Hello {user.first_name}!\n\n"
         "🎬 *TikTok Downloader Bot*\n\n"
-        "📥 Send me any TikTok URL and I'll download it!\n\n"
-        "✅ Supports:\n• Videos\n• Slideshows\n• HD Quality\n\n"
-        "🔗 Example: https://vm.tiktok.com/abc123/\n\n"
-        "Hosted on Koyeb • Always Free 🚀",
+        "📥 Just send me any TikTok URL and I'll download it!\n\n"
+        "✅ *Features:*\n"
+        "• Videos with sound\n"
+        "• Slideshow images\n"
+        "• HD quality\n"
+        "• 24/7 on Koyeb\n\n"
+        "🔗 *Examples:*\n"
+        "• https://vm.tiktok.com/abc123/\n"
+        "• https://tiktok.com/@user/video/123\n\n"
+        "Try it now! 🚀",
         parse_mode='Markdown'
     )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Help command"""
     await update.message.reply_text(
         "🆘 *Help*\n\n"
         "Just send a TikTok URL!\n\n"
         "*Commands:*\n"
-        "/start - Welcome message\n"
+        "/start - Welcome\n"
         "/help - This message\n"
-        "/status - Check bot status\n\n"
-        "*Issues?*\n"
-        "1. Try different URL\n"
-        "2. Check if video is public\n"
-        "3. Wait 1 minute",
+        "/ping - Check bot\n\n"
+        "*Need help?*\n"
+        "1. Use public TikTok URLs\n"
+        "2. Try different URL if fails\n"
+        "3. Some videos are private\n\n"
+        "Hosted on Koyeb • Always Free",
         parse_mode='Markdown'
     )
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check bot status"""
-    uptime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ping command"""
     await update.message.reply_text(
-        f"🤖 *Bot Status*\n\n"
-        f"✅ Online\n"
-        f"🕐 Uptime: {uptime}\n"
-        f"⚡ Host: Koyeb\n"
-        f"🌐 Always Free",
+        f"🏓 Pong!\n\n"
+        f"🤖 Bot is online\n"
+        f"🕐 {datetime.now().strftime('%H:%M:%S')}\n"
+        f"⚡ Powered by Koyeb",
         parse_mode='Markdown'
     )
 
-async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle TikTok URLs"""
     url = update.message.text.strip()
     
-    # Validate
     if "tiktok.com" not in url:
         await update.message.reply_text("❌ Please send a valid TikTok URL")
         return
     
-    # Send processing message
-    msg = await update.message.reply_text("⏳ Processing... Please wait up to 30 seconds.")
+    msg = await update.message.reply_text("⏳ Processing... This may take 20-30 seconds.")
     
     try:
-        # Get TikTok data
-        result = get_tiktok_data(url)
+        result = download_tiktok(url)
         
         if not result["success"]:
             await msg.edit_text(f"❌ Failed: {result.get('error', 'Unknown error')}")
             return
         
-        # Handle slideshow
+        # Slideshow
         if result["type"] == "slideshow":
             images = result["images"]
-            title = result.get("title", "TikTok Slideshow")[:100]
+            title = result["title"]
             
             await msg.edit_text(f"📸 Found {len(images)} images. Sending...")
             
-            # Create media group
             media_group = []
-            for i, img in enumerate(images[:10]):  # Telegram limit
+            for i, img in enumerate(images):
                 if i == 0:
                     caption = f"🖼️ {title}\n"
                     if result.get("author"):
                         caption += f"👤 By: {result['author']}\n"
                     caption += f"📸 {len(images)} photos\n"
                     caption += "\n📥 TikTok Bot • Koyeb"
-                    media_group.append(InputMediaPhoto(media=img, caption=caption))
+                    media_group.append(InputMediaPhoto(media=img, caption=caption[:1024]))
                 else:
                     media_group.append(InputMediaPhoto(media=img))
             
             await update.message.reply_media_group(media=media_group)
             await msg.delete()
         
-        # Handle video
+        # Video
         elif result["type"] == "video":
             video_url = result["video_url"]
-            title = result.get("title", "TikTok Video")[:100]
+            title = result["title"]
             
             await msg.edit_text(f"🎬 Downloading video...")
             
             await update.message.reply_video(
                 video=video_url,
                 caption=f"🎬 {title}\n📥 TikTok Bot • Koyeb",
-                supports_streaming=True
+                supports_streaming=True,
+                read_timeout=60,
+                write_timeout=60
             )
             await msg.delete()
     
@@ -195,60 +244,40 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error: {e}")
         await msg.edit_text(f"❌ Error: {str(e)[:100]}")
 
-# ============ HEALTH CHECK (for Koyeb) ============
-
-from flask import Flask
-from threading import Thread
-import time
-
-web = Flask(__name__)
-
-@web.route('/')
-def home():
-    return "🤖 TikTok Bot is running on Koyeb! 🚀"
-
-@web.route('/health')
-def health():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
-
-def run_web():
-    web.run(host='0.0.0.0', port=PORT)
-
-# Start Flask in background
-Thread(target=run_web, daemon=True).start()
-print(f"✅ Health check running on port {PORT}")
-
 # ============ MAIN ============
 
 def main():
-    """Start the Telegram bot"""
-    print(f"🔑 Token: {BOT_TOKEN[:15]}...")
+    """Start the bot"""
+    print(f"🔑 Token loaded: {BOT_TOKEN[:10]}...")
     
     try:
-        # Create application
-        app = Application.builder().token(BOT_TOKEN).build()
+        # Create bot
+        application = Application.builder().token(BOT_TOKEN).build()
         
         # Add handlers
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(CommandHandler("status", status_command))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_cmd))
+        application.add_handler(CommandHandler("ping", ping))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
         # Start
         print("=" * 60)
-        print("✅ Bot is RUNNING on Koyeb!")
-        print(f"🕐 Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("✅ Telegram bot starting...")
         print("=" * 60)
-        print("\n📱 Open Telegram and:")
-        print("1. Search for your bot")
-        print("2. Send /start")
-        print("3. Send TikTok URL")
         
-        app.run_polling(drop_pending_updates=True)
+        application.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES
+        )
         
     except Exception as e:
-        print(f"❌ Fatal error: {e}")
+        logger.error(f"Bot failed: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
+    # Wait a moment for Flask to start
+    import time
+    time.sleep(2)
+    
+    print("🚀 Starting bot components...")
     main()
