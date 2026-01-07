@@ -1,472 +1,254 @@
 #!/usr/bin/env python3
 """
-TikTok Downloader Bot - Working Slideshow Support
+TikTok Downloader Bot - Optimized for Koyeb
 """
 
 import os
 import sys
 import requests
-import re
+import logging
 from datetime import datetime
 
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 print("=" * 60)
-print("🎬 TikTok Downloader Bot with Slideshow Support")
+print("🎬 TikTok Downloader Bot - Koyeb Edition")
 print("=" * 60)
 
 try:
     from telegram import Update, InputMediaPhoto
     from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-    print("✅ Packages imported successfully!")
+    print("✅ Packages imported!")
 except ImportError as e:
-    print(f"❌ Missing package: {e}")
-    print("Run: pip install python-telegram-bot requests")
+    print(f"❌ Missing: {e}")
     sys.exit(1)
 
 # ============ CONFIGURATION ============
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not BOT_TOKEN:
     print("❌ ERROR: TELEGRAM_TOKEN not found!")
-    print("\nHow to fix:")
-    print("1. Get token from @BotFather")
-    print("2. In Replit, click 🔒 Lock icon")
-    print("3. Add: TELEGRAM_TOKEN = your_token")
+    print("\nSet it in Koyeb Dashboard:")
+    print("1. Go to your service")
+    print("2. Click 'Variables'")
+    print("3. Add: TELEGRAM_TOKEN")
+    print("4. Value: your_bot_token")
     sys.exit(1)
 
-# ============ TIKTOK API FUNCTIONS ============
+PORT = int(os.environ.get("PORT", 8080))
 
+# ============ TIKTOK API ============
 
-def extract_photo_id(url: str) -> str:
-    """Extract photo ID from TikTok URL"""
-    patterns = [
-        r'/photo/(\d+)', r'/video/(\d+)', r'@[^/]+/(?:photo|video)/(\d+)'
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-
-    # If no pattern matches, try to extract any numeric ID
-    numbers = re.findall(r'\d+', url)
-    if numbers:
-        # Take the longest number (most likely the ID)
-        return max(numbers, key=len)
-
-    return ""
-
-
-def get_tiktok_content(url: str):
-    """Get TikTok content using multiple API endpoints"""
-
-    # Try different API endpoints
-    api_endpoints = [
-        # Primary API for slideshows
-        {
-            "name": "TikWM Slideshow",
-            "url": f"https://www.tikwm.com/api/?url={url}",
-            "parse_func": parse_tikwm_response
-        },
-        # Alternative API
-        {
-            "name": "TikTok Download API",
-            "url": f"https://api.tiklydown.eu.org/api/download?url={url}",
-            "parse_func": parse_tiklydown_response
-        },
-        # Another backup API
-        {
-            "name": "TikMate",
-            "url": f"https://tikmate.online/api/ajaxSearch?url={url}",
-            "parse_func": parse_tikmate_response
+def get_tiktok_data(url: str):
+    """Get TikTok video/slideshow data"""
+    try:
+        # Use TikWM API
+        api_url = f"https://www.tikwm.com/api/?url={url}&hd=1"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json"
         }
-    ]
+        
+        response = requests.get(api_url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if data.get("code") == 0 and data.get("data"):
+                content = data["data"]
+                
+                # Check for slideshow
+                images = content.get("images")
+                if images:
+                    if isinstance(images, str):
+                        images = [images]
+                    
+                    return {
+                        "success": True,
+                        "type": "slideshow",
+                        "images": images[:10],  # Max 10 for Telegram
+                        "title": content.get("title", "TikTok Slideshow"),
+                        "author": content.get("author", {}).get("nickname", "")
+                    }
+                
+                # Check for video
+                video_url = content.get("hdplay") or content.get("play")
+                if video_url:
+                    return {
+                        "success": True,
+                        "type": "video",
+                        "video_url": video_url,
+                        "title": content.get("title", "TikTok Video")
+                    }
+        
+        return {"success": False, "error": "API failed"}
+    
+    except Exception as e:
+        logger.error(f"TikTok API error: {e}")
+        return {"success": False, "error": str(e)}
 
-    headers = {
-        "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.tiktok.com/"
-    }
+# ============ BOT COMMANDS ============
 
-    for api in api_endpoints:
-        try:
-            print(f"🔧 Trying {api['name']}...")
-            response = requests.get(api["url"], headers=headers, timeout=15)
-
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    result = api["parse_func"](data)
-                    if result:
-                        print(f"✅ Success from {api['name']}")
-                        return result
-                except Exception as e:
-                    print(f"❌ Parse error from {api['name']}: {e}")
-                    continue
-        except Exception as e:
-            print(f"❌ API {api['name']} failed: {e}")
-            continue
-
-    return {"success": False, "error": "All APIs failed"}
-
-
-def parse_tikwm_response(data: dict):
-    """Parse TikWM API response"""
-    if isinstance(data, dict) and data.get("code") == 0 and data.get("data"):
-        content = data["data"]
-
-        # Check for slideshow
-        images = content.get("images")
-        if images:
-            if isinstance(images, str):
-                images = [images]
-            elif isinstance(images, list):
-                pass
-            else:
-                return None
-
-            return {
-                "success": True,
-                "type": "slideshow",
-                "images": images,
-                "title": content.get("title", "TikTok Slideshow"),
-                "author": content.get("author", {}).get("nickname", "Unknown")
-            }
-
-        # Check for video
-        video_url = content.get("hdplay") or content.get("play")
-        if video_url:
-            return {
-                "success": True,
-                "type": "video",
-                "video_url": video_url,
-                "title": content.get("title", "TikTok Video")
-            }
-
-    return None
-
-
-def parse_tiklydown_response(data: dict):
-    """Parse Tiklydown API response"""
-    if not isinstance(data, dict):
-        return None
-
-    # Check for slideshow
-    if data.get("type") == "image":
-        images = data.get("imageUrls", [])
-        if isinstance(images, str):
-            images = [images]
-
-        if images:
-            return {
-                "success": True,
-                "type": "slideshow",
-                "images": images,
-                "title": data.get("desc", "TikTok Slideshow")
-            }
-
-    # Check for video
-    video_url = data.get("videoUrl")
-    if video_url:
-        return {
-            "success": True,
-            "type": "video",
-            "video_url": video_url,
-            "title": data.get("desc", "TikTok Video")
-        }
-
-    return None
-
-
-def parse_tikmate_response(data: dict):
-    """Parse TikMate API response"""
-    if not isinstance(data, dict):
-        return None
-
-    # TikMate returns different structure
-    if data.get("success"):
-        content = data.get("data", {})
-
-        # Check for slideshow
-        images = content.get("images", [])
-        if images:
-            if isinstance(images, str):
-                images = [images]
-
-            return {
-                "success": True,
-                "type": "slideshow",
-                "images": images,
-                "title": content.get("desc", "TikTok Slideshow")
-            }
-
-        # Check for video
-        video_url = content.get("play")
-        if video_url:
-            return {
-                "success": True,
-                "type": "video",
-                "video_url": video_url,
-                "title": content.get("desc", "TikTok Video")
-            }
-
-    return None
-
-
-# ============ BOT FUNCTIONS ============
-
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message"""
     user = update.effective_user
     await update.message.reply_text(
         f"👋 Hello {user.first_name}!\n\n"
         "🎬 *TikTok Downloader Bot*\n\n"
-        "📥 *I can download:*\n"
-        "• Videos (with sound)\n"
-        "• Slideshows (multiple photos)\n\n"
-        "📤 *How to use:*\n"
-        "Just send me any TikTok URL!\n\n"
-        "*Examples:*\n"
-        "• https://vm.tiktok.com/abc123/\n"
-        "• https://www.tiktok.com/@user/photo/123456\n\n"
-        "Try it now! Send me a TikTok link. 🚀",
-        parse_mode='Markdown')
-
+        "📥 Send me any TikTok URL and I'll download it!\n\n"
+        "✅ Supports:\n• Videos\n• Slideshows\n• HD Quality\n\n"
+        "🔗 Example: https://vm.tiktok.com/abc123/\n\n"
+        "Hosted on Koyeb • Always Free 🚀",
+        parse_mode='Markdown'
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send help message"""
+    """Help command"""
     await update.message.reply_text(
-        "🆘 *Help Center*\n\n"
-        "Send any TikTok URL and I'll download it for you!\n\n"
-        "*For slideshows:*\n"
-        "I'll send all photos as an album.\n\n"
-        "*For videos:*\n"
-        "I'll send the video with sound.\n\n"
-        "*Having issues?*\n"
-        "• Try a different TikTok URL\n"
-        "• Make sure the content is public\n"
-        "• Wait a minute and try again",
-        parse_mode='Markdown')
+        "🆘 *Help*\n\n"
+        "Just send a TikTok URL!\n\n"
+        "*Commands:*\n"
+        "/start - Welcome message\n"
+        "/help - This message\n"
+        "/status - Check bot status\n\n"
+        "*Issues?*\n"
+        "1. Try different URL\n"
+        "2. Check if video is public\n"
+        "3. Wait 1 minute",
+        parse_mode='Markdown'
+    )
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check bot status"""
+    uptime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    await update.message.reply_text(
+        f"🤖 *Bot Status*\n\n"
+        f"✅ Online\n"
+        f"🕐 Uptime: {uptime}\n"
+        f"⚡ Host: Koyeb\n"
+        f"🌐 Always Free",
+        parse_mode='Markdown'
+    )
 
-async def handle_tiktok_url(update: Update,
-                            context: ContextTypes.DEFAULT_TYPE):
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle TikTok URLs"""
     url = update.message.text.strip()
-    user = update.effective_user
-
-    print(f"📥 URL received from {user.username or user.id}: {url[:50]}...")
-
-    # Validate URL
-    if not any(domain in url for domain in ["tiktok.com", "douyin.com"]):
-        await update.message.reply_text(
-            "❌ Please send a valid TikTok URL\n\n"
-            "Example: https://vm.tiktok.com/abc123/")
+    
+    # Validate
+    if "tiktok.com" not in url:
+        await update.message.reply_text("❌ Please send a valid TikTok URL")
         return
-
-    # Show processing message
-    msg = await update.message.reply_text(
-        "🔍 *Processing your request...*\n"
-        "⏳ This may take 10-20 seconds",
-        parse_mode='Markdown')
-
+    
+    # Send processing message
+    msg = await update.message.reply_text("⏳ Processing... Please wait up to 30 seconds.")
+    
     try:
-        # Get content from TikTok APIs
-        result = get_tiktok_content(url)
-
+        # Get TikTok data
+        result = get_tiktok_data(url)
+        
         if not result["success"]:
-            await msg.edit_text(
-                f"❌ *Download Failed*\n\n"
-                f"Error: {result.get('error', 'Unknown error')}\n\n"
-                f"*Try:*\n"
-                f"• Check if the content is public\n"
-                f"• Try a different TikTok URL\n"
-                f"• The API might be temporarily down",
-                parse_mode='Markdown')
+            await msg.edit_text(f"❌ Failed: {result.get('error', 'Unknown error')}")
             return
-
-        # Handle SLIDESHOW
+        
+        # Handle slideshow
         if result["type"] == "slideshow":
             images = result["images"]
             title = result.get("title", "TikTok Slideshow")[:100]
-
-            print(f"📸 Found {len(images)} images for slideshow")
-
-            # Ensure images is a list
-            if isinstance(images, str):
-                images = [images]
-
-            if not images:
-                await msg.edit_text("❌ No images found in slideshow")
-                return
-
-            # Limit to 10 images (Telegram limit)
-            images = images[:10]
-
-            await msg.edit_text(
-                f"🖼️ *Slideshow Detected!*\n\n"
-                f"📸 *Info:*\n"
-                f"• Images: {len(images)} photos\n"
-                f"• Title: {title}\n\n"
-                f"⏬ *Downloading images...*",
-                parse_mode='Markdown')
-
-            try:
-                # Create media group
-                media_group = []
-
-                for i, image_url in enumerate(images):
-                    # Clean URL - remove any tracking parameters
-                    clean_url = image_url.split(
-                        '?')[0] if '?' in image_url else image_url
-
-                    # First image gets caption
-                    if i == 0:
-                        caption = f"🖼️ {title}\n"
-                        if result.get("author"):
-                            caption += f"👤 By: {result['author']}\n"
-                        caption += f"📸 {len(images)} photos\n"
-                        caption += "\n📥 Downloaded via TikTok Bot"
-
-                        media_group.append(
-                            InputMediaPhoto(media=clean_url,
-                                            caption=caption[:1024]))
-                    else:
-                        media_group.append(InputMediaPhoto(media=clean_url))
-
-                # Send the album
-                await update.message.reply_media_group(media=media_group)
-                await msg.delete()
-
-            except Exception as e:
-                print(f"Error sending album: {e}")
-
-                # Fallback: send images one by one
-                await msg.edit_text(f"📸 *Sending images individually...*\n"
-                                    f"{len(images)} photos")
-
-                sent_count = 0
-                for i, image_url in enumerate(images[:5]):  # Limit to 5
-                    try:
-                        if i == 0:
-                            await update.message.reply_photo(
-                                photo=image_url,
-                                caption=
-                                f"🖼️ {title} (1/{min(len(images), 5)})\n📥 TikTok Bot"
-                            )
-                        else:
-                            await update.message.reply_photo(
-                                photo=image_url,
-                                caption=f"🖼️ ({i+1}/{min(len(images), 5)})")
-                        sent_count += 1
-                    except:
-                        continue
-
-                if sent_count > 0:
-                    await msg.edit_text(f"✅ Sent {sent_count} images!")
+            
+            await msg.edit_text(f"📸 Found {len(images)} images. Sending...")
+            
+            # Create media group
+            media_group = []
+            for i, img in enumerate(images[:10]):  # Telegram limit
+                if i == 0:
+                    caption = f"🖼️ {title}\n"
+                    if result.get("author"):
+                        caption += f"👤 By: {result['author']}\n"
+                    caption += f"📸 {len(images)} photos\n"
+                    caption += "\n📥 TikTok Bot • Koyeb"
+                    media_group.append(InputMediaPhoto(media=img, caption=caption))
                 else:
-                    await msg.edit_text("❌ Could not send any images")
-
-        # Handle VIDEO
+                    media_group.append(InputMediaPhoto(media=img))
+            
+            await update.message.reply_media_group(media=media_group)
+            await msg.delete()
+        
+        # Handle video
         elif result["type"] == "video":
             video_url = result["video_url"]
             title = result.get("title", "TikTok Video")[:100]
-
-            await msg.edit_text(
-                f"🎬 *Video Detected!*\n\n"
-                f"📹 *Title:* {title}\n\n"
-                f"⏬ *Downloading video...*",
-                parse_mode='Markdown')
-
-            try:
-                await update.message.reply_video(
-                    video=video_url,
-                    caption=f"🎬 {title}\n📥 Downloaded via TikTok Bot",
-                    supports_streaming=True,
-                    read_timeout=60,
-                    write_timeout=60)
-                await msg.delete()
-
-            except Exception as e:
-                print(f"Error sending video: {e}")
-                await msg.edit_text(
-                    f"✅ *Video Downloaded!*\n\n"
-                    f"📹 *Title:* {title}\n"
-                    f"🔗 *Direct Link:* {video_url[:50]}...\n\n"
-                    f"⚠️ Could not send via Telegram\n"
-                    f"Copy the link above to download",
-                    parse_mode='Markdown')
-
+            
+            await msg.edit_text(f"🎬 Downloading video...")
+            
+            await update.message.reply_video(
+                video=video_url,
+                caption=f"🎬 {title}\n📥 TikTok Bot • Koyeb",
+                supports_streaming=True
+            )
+            await msg.delete()
+    
     except Exception as e:
-        print(f"Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error: {e}")
+        await msg.edit_text(f"❌ Error: {str(e)[:100]}")
 
-        await msg.edit_text(
-            f"❌ *Unexpected Error*\n\n"
-            f"`{str(e)[:100]}`\n\n"
-            f"Please try again or use /help",
-            parse_mode='Markdown')
+# ============ HEALTH CHECK (for Koyeb) ============
 
-
-# ============ KEEP ALIVE ============
-print("🔄 Setting up keep-alive...")
-
-try:
-    from keep_alive import keep_alive
-    keep_alive()
-except:
-    # Create keep_alive.py
-    with open("keep_alive.py", "w") as f:
-        f.write('''from flask import Flask
+from flask import Flask
 from threading import Thread
+import time
 
-app = Flask(__name__)
+web = Flask(__name__)
 
-@app.route('/')
+@web.route('/')
 def home():
-    return "TikTok Bot is running!"
+    return "🤖 TikTok Bot is running on Koyeb! 🚀"
 
-def run():
-    app.run(host="0.0.0.0", port=8080)
+@web.route('/health')
+def health():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-''')
+def run_web():
+    web.run(host='0.0.0.0', port=PORT)
 
-    from keep_alive import keep_alive
-    keep_alive()
+# Start Flask in background
+Thread(target=run_web, daemon=True).start()
+print(f"✅ Health check running on port {PORT}")
 
-print("✅ Keep-alive started!")
-
-# ============ MAIN FUNCTION ============
-
+# ============ MAIN ============
 
 def main():
-    """Start the bot"""
-    print(f"\n🤖 Bot Token: {BOT_TOKEN[:15]}...")
-
+    """Start the Telegram bot"""
+    print(f"🔑 Token: {BOT_TOKEN[:15]}...")
+    
     try:
+        # Create application
         app = Application.builder().token(BOT_TOKEN).build()
-
+        
         # Add handlers
-        app.add_handler(CommandHandler("start", start_command))
+        app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tiktok_url))
-
+        app.add_handler(CommandHandler("status", status_command))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+        
+        # Start
         print("=" * 60)
-        print("✅ Bot is RUNNING!")
+        print("✅ Bot is RUNNING on Koyeb!")
         print(f"🕐 Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("=" * 60)
-        print("\n📱 Send /start to begin")
-
+        print("\n📱 Open Telegram and:")
+        print("1. Search for your bot")
+        print("2. Send /start")
+        print("3. Send TikTok URL")
+        
         app.run_polling(drop_pending_updates=True)
-
+        
     except Exception as e:
-        print(f"\n❌ Fatal error: {e}")
-
+        print(f"❌ Fatal error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
