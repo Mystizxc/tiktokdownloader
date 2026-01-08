@@ -8,6 +8,9 @@ import sys
 import requests
 import logging
 from datetime import datetime
+import threading
+import time
+import requests
 
 # Setup logging
 logging.basicConfig(
@@ -56,8 +59,9 @@ def home():
         <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h1>🤖 TikTok Downloader Bot</h1>
             <p>Bot is running on Koyeb! 🚀</p>
-            <p><a href="/health">Health Check</a></p>
-            <p><a href="/status">Status</a></p>
+            <p><strong>Keep-alive: ACTIVE</strong></p>
+            <p><a href="/health">Health Check</a> | <a href="/ping">Ping</a></p>
+            <p>Time: """ + datetime.now().strftime("%H:%M:%S") + """</p>
         </body>
     </html>
     """
@@ -68,8 +72,16 @@ def health():
         "status": "healthy",
         "service": "tiktok-bot",
         "timestamp": datetime.now().isoformat(),
-        "telegram": "connected"
+        "telegram": "connected",
+        "keep_alive": "active",
+        "memory": "ok",
+        "requests_served": "active"
     })
+
+@app.route('/ping')
+def ping_endpoint():
+    """Simple ping endpoint"""
+    return "PONG", 200
 
 @app.route('/status')
 def status():
@@ -136,6 +148,36 @@ def download_tiktok(url: str):
     except Exception as e:
         logger.error(f"Download error: {e}")
         return {"success": False, "error": str(e)}
+
+# ============ KEEP ALIVE SYSTEM ============
+def keep_alive_ping():
+    """Ping own health endpoint to prevent sleeping"""
+    print("🔧 Starting keep-alive ping system...")
+    
+    while True:
+        try:
+            # Get current timestamp
+            current_time = datetime.now().strftime("%H:%M:%S")
+            
+            # Try to ping health endpoint
+            response = requests.get(f"http://localhost:{PORT}/health", timeout=10)
+            
+            if response.status_code == 200:
+                print(f"✅ [{current_time}] Keep-alive ping successful")
+            else:
+                print(f"⚠️ [{current_time}] Ping failed: {response.status_code}")
+                
+        except Exception as e:
+            print(f"❌ [{current_time}] Keep-alive error: {str(e)[:50]}")
+        
+        # Ping every 4 minutes (240 seconds)
+        time.sleep(240)
+
+def start_keep_alive():
+    """Start keep-alive in background thread"""
+    keep_alive_thread = threading.Thread(target=keep_alive_ping, daemon=True)
+    keep_alive_thread.start()
+    print("✅ Keep-alive system started (pings every 4 minutes)")
 
 # ============ BOT COMMANDS ============
 
@@ -249,6 +291,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Start the bot"""
     print(f"🔑 Token loaded: {BOT_TOKEN[:10]}...")
+
+    print("⏳ Waiting for Flask to start...")
+    time.sleep(3)
+    
+    # Start keep-alive system
+    start_keep_alive()
     
     try:
         # Create bot
