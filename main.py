@@ -103,18 +103,22 @@ print(f"✅ Health check running on port {PORT}")
 # ============ TIKTOK FUNCTIONS ============
 
 def download_tiktok(url: str):
-    """Download TikTok video or slideshow"""
+    """Download TikTok video or slideshow with HD quality"""
     try:
-        api_url = f"https://www.tikwm.com/api/?url={url}"
+        # Try HD quality first
+        api_url = f"https://www.tikwm.com/api/?url={url}&hd=1"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json"
         }
         
+        print(f"🔍 Requesting HD quality from: {api_url[:80]}...")
+        
         response = requests.get(api_url, headers=headers, timeout=30)
         
         if response.status_code == 200:
             data = response.json()
+            print(f"📊 API Response: {data.get('code', 'no code')}")
             
             if data.get("code") == 0 and data.get("data"):
                 content = data["data"]
@@ -133,21 +137,54 @@ def download_tiktok(url: str):
                         "author": content.get("author", {}).get("nickname", "")
                     }
                 
-                # Video detection
-                video_url = content.get("hdplay") or content.get("play")
+                # Video detection - Try HD first, then normal
+                video_url = content.get("hdplay")  # HD without watermark
+                quality = "HD"
+                
+                if not video_url:
+                    video_url = content.get("play")  # Normal without watermark
+                    quality = "Normal"
+                    print("⚠️ HD not available, using normal quality")
+                
                 if video_url:
+                    quality_label, size_mb = check_video_quality(video_url)
+                    print(f"✅ Quality: {quality_label}, Size: {size_mb:.1f}MB")
+                    
                     return {
                         "success": True,
                         "type": "video",
                         "video_url": video_url,
-                        "title": content.get("title", "TikTok Video")[:100]
+                        "title": content.get("title", "TikTok Video")[:100],
+                        "quality": quality_label,
+                        "size_mb": f"{size_mb:.1f}",
+                        "author": content.get("author", {}).get("nickname", "")
                     }
+                else:
+                    print("❌ No video URL found in API response")
         
-        return {"success": False, "error": "API failed"}
+        # If HD API fails, try alternative API
+        print("🔄 Trying alternative API...")
+        alt_api = f"https://api.tiklydown.eu.org/api/download?url={url}"
+        response = requests.get(alt_api, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            video_url = data.get("videoUrl")
+            if video_url:
+                return {
+                    "success": True,
+                    "type": "video",
+                    "video_url": video_url,
+                    "title": data.get("desc", "TikTok Video")[:100],
+                    "quality": "Normal",
+                    "api": "alternative"
+                }
     
     except Exception as e:
         logger.error(f"Download error: {e}")
-        return {"success": False, "error": str(e)}
+        print(f"❌ Exception: {e}")
+    
+    return {"success": False, "error": "Failed to download video"}
 
 # ============ KEEP ALIVE SYSTEM ============
 def keep_alive_ping():
@@ -270,12 +307,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif result["type"] == "video":
             video_url = result["video_url"]
             title = result["title"]
+            quality = result.get("quality", "Normal")
             
-            await msg.edit_text(f"🎬 Downloading video...")
+            await msg.edit_text(f"🎬 Downloading {quality} quality video...")
+            
+            caption = f"🎬 {title}\n"
+            caption += f"📊 Quality: {quality}\n"
+            if result.get("author"):
+                caption += f"👤 By: {result['author']}\n"
+            caption += "\n📥 TikTok Bot • Koyeb"
             
             await update.message.reply_video(
                 video=video_url,
-                caption=f"🎬 {title}\n📥 TikTok Bot • Koyeb",
+                caption=caption,
                 supports_streaming=True,
                 read_timeout=60,
                 write_timeout=60
@@ -285,6 +329,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error: {e}")
         await msg.edit_text(f"❌ Error: {str(e)[:100]}")
+
+def check_video_quality(video_url: str):
+    """Check video size and quality"""
+    try:
+        # Get video headers
+        response = requests.head(video_url, timeout=10, allow_redirects=True)
+        
+        size_bytes = int(response.headers.get('Content-Length', 0))
+        size_mb = size_bytes / (1024 * 1024)
+        
+        print(f"📊 Video Info:")
+        print(f"  • Size: {size_mb:.2f} MB ({size_bytes:,} bytes)")
+        print(f"  • Type: {response.headers.get('Content-Type', 'unknown')}")
+        print(f"  • URL: {video_url[:80]}...")
+        
+        # Determine quality based on size
+        if size_mb > 5:
+            quality = "HD (likely 720p+)"
+        elif size_mb > 2:
+            quality = "Medium (480p-720p)"
+        else:
+            quality = "Low (<480p)"
+        
+        return quality, size_mb
+        
+    except Exception as e:
+        print(f"❌ Quality check error: {e}")
+        return "Unknown", 0
 
 # ============ MAIN ============
 
